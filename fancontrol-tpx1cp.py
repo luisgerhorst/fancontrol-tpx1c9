@@ -10,7 +10,7 @@ CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*
 # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
 CPU_MAP = [(0, 0),
            (55, 0),
-           (80, 40),   # 4800RPM
+           (75, 40),   # 4800RPM
            (85, 80),   # 4800RPM
            (90, 160),
            (95, 255)]

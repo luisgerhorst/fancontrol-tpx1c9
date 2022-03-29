@@ -5,57 +5,96 @@ import sys
 from pathlib import Path
 import logging
 
+CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
+
+# (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
+CPU_MAP = [(0, 0),
+           (55, 0),
+           (80, 40),   # 4800RPM
+           (85, 80),   # 4800RPM
+           (90, 160),
+           (95, 255)]
+
+CPU_TEMP_HIST_MAX = 30
+CPU_TEMP_HIST = list()
+
+def get_cpu_pwm(cpu_level):
+    global CPU_PATH
+    global CPU_MAP
+    global CPU_TEMP_HIST_MAX
+    global CPU_TEMP_HIST
+
+    curr_temp = int(CPU_PATH.read_text()) / 1000
+    CPU_TEMP_HIST.append(curr_temp)
+    if len(CPU_TEMP_HIST) > CPU_TEMP_HIST_MAX:
+        CPU_TEMP_HIST.pop(0)
+    temp = sum(CPU_TEMP_HIST)/len(CPU_TEMP_HIST)
+
+    if temp >= CPU_MAP[cpu_level][0]:
+        for (l,(t,p)) in enumerate(CPU_MAP):
+            if temp >= t:
+                cpu_level = l
+
+    # Only reduce level if we are below the lower level's enable_temp.
+    if temp < CPU_MAP[cpu_level][0]:
+        for (l,(t,p)) in reversed(list(enumerate(CPU_MAP))):
+            if temp < t:
+                cpu_level = l
+
+    return cpu_level, curr_temp, CPU_MAP[cpu_level][1]
+
+
+# /sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon3/temp1_crit
+NVME_PATH = list(Path('/').glob('sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon*/'))[0]
+NVME_MAX = int(NVME_PATH.joinpath("temp1_max").read_text()) / 1000
+NVME_CRIT = int(NVME_PATH.joinpath("temp1_crit").read_text()) / 1000
+
+def get_nvme_pwm():
+    global NVME_PATH
+    global NVME_MAX
+
+    temp = int(NVME_PATH.joinpath("temp1_input").read_text()) / 1000
+
+    pwm = 0
+    crit = False
+    if temp >= NVME_MAX-10:
+        pwm = 40
+    if temp >= NVME_MAX:
+        pwm = 255
+    if temp >= NVME_CRIT-5:
+        pwm = 255
+        crit = True
+
+    return temp, pwm, crit
+
 def main() -> int:
     logging.basicConfig(level=logging.DEBUG)
 
-    temp_path=Path("/sys/class/hwmon/hwmon5/temp1_input")
-    pwm_path=Path("/sys/class/hwmon/hwmon5/pwm1")
-    pwm_enable_path=Path("/sys/class/hwmon/hwmon5/pwm1_enable")
+    INTERVAL=2
+    MAX_PWM_DELTA = 40
+    PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
+    PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
 
-    # sec_temp_path=Path("/sys/class/hwmon/hwmon5/temp1_input")
-
-    interval=2
-    # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
-    tp_map = [(0, 0),
-              (55, 0),
-              (65, 40),   # 4500RPM
-              (75, 80),   # 4800RPM
-              (85, 120),
-              (95, 255)]
-    max_pwm_delta = 5 # only change by x pwm per interval
-
-    last_temp = 0
+    cpu_level = 0
     last_pwm = 0
-    level_temp = 0
 
     while True:
-        temp = int(temp_path.read_text()) / 1000
+        cpu_level, cpu_temp, cpu_pwm = get_cpu_pwm(cpu_level)
+        nvme_temp, nvme_pwm, nvme_crit = get_nvme_pwm()
 
-        pwm = None
-        if temp >= level_temp:
-            for (t,p) in tp_map:
-                if temp >= t:
-                    level_temp = t
-                    pwm = p
-
-        # Only reduce level if we are below the lower level's enable_temp.
-        if temp < level_temp:
-            for (t,p) in reversed(tp_map):
-                if temp < t:
-                    level_temp = t
-                    pwm = p
+        pwm = max(cpu_pwm, nvme_pwm)
 
         # Limit rate of pwm increase to prevent over-compensation.
-        max_pwm = last_pwm + max_pwm_delta
-        if pwm > max_pwm:
+        max_pwm = last_pwm + MAX_PWM_DELTA
+        if pwm > max_pwm and not nvme_crit:
             pwm = max_pwm
 
-        logging.info("%d %d" % (temp, pwm))
-        pwm_path.write_text(str(pwm))
-        pwm_enable_path.write_text("1")
-        last_temp = temp
+        logging.info("cpu %d %d, nvme %d %d => %d" % (cpu_temp, cpu_pwm, nvme_temp, nvme_pwm, pwm))
+        PWM_PATH.write_text(str(pwm))
+        PWM_ENABLE_PATH.write_text("1")
         last_pwm = pwm
-        time.sleep(interval)
+
+        time.sleep(INTERVAL)
     return 0
 
 if __name__ == '__main__':

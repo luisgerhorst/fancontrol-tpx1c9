@@ -5,7 +5,8 @@ import sys
 from pathlib import Path
 import logging
 
-CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
+# CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
+CPU_PATH = list(Path('/').glob('sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input'))[0]
 
 # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
 CPU_MAP = [(0, 0),
@@ -15,7 +16,8 @@ CPU_MAP = [(0, 0),
            (90, 160),
            (95, 255)]
 
-CPU_TEMP_HIST_MAX = 30
+INTERVAL=1
+CPU_TEMP_HIST_MAX = 60/INTERVAL
 CPU_TEMP_HIST = list()
 
 def get_cpu_pwm(cpu_level):
@@ -24,18 +26,24 @@ def get_cpu_pwm(cpu_level):
     global CPU_TEMP_HIST_MAX
     global CPU_TEMP_HIST
 
+    # In DegC.
     curr_temp = int(CPU_PATH.read_text()) / 1000
+
+    # Average out temperature spikes over N seconds (CPU_TEMP_HIST_MAX * INTERVAL).
     CPU_TEMP_HIST.append(curr_temp)
     if len(CPU_TEMP_HIST) > CPU_TEMP_HIST_MAX:
         CPU_TEMP_HIST.pop(0)
     temp = sum(CPU_TEMP_HIST)/len(CPU_TEMP_HIST)
 
+    # Increase the speed if the average temp. reaches the enable-temperature of
+    # the next level.
     if temp >= CPU_MAP[cpu_level][0]:
         for (l,(t,p)) in enumerate(CPU_MAP):
             if temp >= t:
                 cpu_level = l
 
-    # Only reduce level if we are below the lower level's enable_temp.
+    # Only reduce level if we are below the lower level's enable_temp. This
+    # prevents the fan from spinning up/down too frequently.
     if temp < CPU_MAP[cpu_level][0]:
         for (l,(t,p)) in reversed(list(enumerate(CPU_MAP))):
             if temp < t:
@@ -55,6 +63,7 @@ def get_nvme_pwm():
 
     temp = int(NVME_PATH.joinpath("temp1_input").read_text()) / 1000
 
+    # Very primitive, should never trigger anyway.
     pwm = 0
     crit = False
     if temp >= NVME_MAX-10:
@@ -70,7 +79,6 @@ def get_nvme_pwm():
 def main() -> int:
     logging.basicConfig(level=logging.DEBUG)
 
-    INTERVAL=2
     MAX_PWM_DELTA = 40
     PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
     PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
@@ -84,7 +92,8 @@ def main() -> int:
 
         pwm = max(cpu_pwm, nvme_pwm)
 
-        # Limit rate of pwm increase to prevent over-compensation.
+        # Limit rate of pwm increase to prevent over-compensation. Fanspeed can
+        # not change as fast anyway.
         max_pwm = last_pwm + MAX_PWM_DELTA
         if pwm > max_pwm and not nvme_crit:
             pwm = max_pwm

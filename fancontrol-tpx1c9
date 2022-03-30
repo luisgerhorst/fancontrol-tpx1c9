@@ -93,7 +93,8 @@ def main() -> int:
         pwm = max(cpu_pwm, nvme_pwm)
 
         # Limit rate of pwm increase to prevent over-compensation. Fanspeed can
-        # not change as fast anyway.
+        # not change as fast anyway. Rarely triggers as average temp. does not
+        # change quickly anyway.
         max_pwm = last_pwm + MAX_PWM_DELTA
         if pwm > max_pwm and not nvme_crit:
             pwm = max_pwm
@@ -107,4 +108,4 @@ def main() -> int:
     return 0
 
 if __name__ == '__main__':
-    sys.exit(main())  # next section explains the use of sys.exit
+    sys.exit(main())

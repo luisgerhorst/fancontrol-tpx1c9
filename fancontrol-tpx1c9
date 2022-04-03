@@ -11,10 +11,15 @@ CPU_PATH = list(Path('/').glob('sys/devices/platform/coretemp.0/hwmon/hwmon*/tem
 # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
 CPU_MAP = [(0, 0),
            (55, 0),
-           (75, 40),   # 4800RPM
-           (85, 100),   # 4800RPM
-           (90, 160),
+           (75, 40),
+           (85, 80),
+           (90, 120),
            (95, 255)]
+# PWM:RPM
+# 30:0
+# 35:4500
+# 80:4800
+# 255:8000
 
 INTERVAL=1
 CPU_TEMP_HIST_MAX = 60/INTERVAL
@@ -76,15 +81,34 @@ def get_nvme_pwm():
 
     return temp, pwm, crit
 
-def main() -> int:
-    logging.basicConfig(level=logging.DEBUG)
+PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
+PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
 
+# Does not provide benefit.
+#
+# RPM_INTERVAL=0.1
+# FAN_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/fan1_input'))[0]
+#
+# def set_rpm(target_rpm, target_time, last_pwm):
+#     elapsed = 0
+#     pwm = last_pwm
+#     delta = 1
+#     while elapsed < target_time:
+#         rpm = int(FAN_PATH.read_text())
+#         if rpm < target_rpm:
+#             pwm = min(255, pwm + delta)
+#         if rpm > target_rpm:
+#             pwm = max(0, pwm - delta)
+#         PWM_PATH.write_text(str(pwm))
+#         time.sleep(RPM_INTERVAL)
+#         elapsed += RPM_INTERVAL
+#     return pwm
+
+def pwm_loop():
     MAX_PWM_DELTA = 20
-    PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
-    PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
 
     cpu_level = 0
-    last_pwm = 0
+    last_pwm = 30
 
     while True:
         cpu_level, cpu_temp, cpu_avg_temp, cpu_pwm = get_cpu_pwm(cpu_level)
@@ -100,11 +124,24 @@ def main() -> int:
             pwm = max_pwm
 
         logging.info("cpu %d°C %d°C %dpwm, nvme %d°C %dpwm => %dpwm" % (cpu_temp, cpu_avg_temp, cpu_pwm, nvme_temp, nvme_pwm, pwm))
-        PWM_PATH.write_text(str(pwm))
+
+        # Doing this once is enough, but it has to be repeated after the system
+        # went to standby. Therefor just do it always.
         PWM_ENABLE_PATH.write_text("1")
+        PWM_PATH.write_text(str(pwm))
         last_pwm = pwm
 
         time.sleep(INTERVAL)
+
+def main() -> int:
+    logging.basicConfig(level=logging.DEBUG)
+
+    try:
+        pwm_loop()
+    finally:
+        logging.info("pwm_enable := 0")
+        PWM_ENABLE_PATH.write_text("0")
+
     return 0
 
 if __name__ == '__main__':

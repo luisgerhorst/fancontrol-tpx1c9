@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 import logging
 
-# CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
-CPU_PATH = list(Path('/').glob('sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input'))[0]
+# TODO: Use a different scale if noise-canceling headphones are connected or if
+# it's loud around us (detect using microphone).
 
 # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
 CPU_MAP = [(0, 0),
@@ -26,12 +26,12 @@ CPU_TEMP_HIST_MAX = 60/INTERVAL
 CPU_TEMP_HIST = list()
 
 def get_cpu_pwm(cpu_level):
-    global CPU_PATH
-    global CPU_MAP
     global CPU_TEMP_HIST_MAX
     global CPU_TEMP_HIST
 
     # In DegC.
+    # CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
+    CPU_PATH = list(Path('/').glob('sys/devices/platform/coretemp.0/hwmon/hwmon*/temp1_input'))[0]
     curr_temp = int(CPU_PATH.read_text()) / 1000
 
     # Average out temperature spikes over N seconds (CPU_TEMP_HIST_MAX * INTERVAL).
@@ -57,14 +57,11 @@ def get_cpu_pwm(cpu_level):
     return cpu_level, curr_temp, temp, CPU_MAP[cpu_level][1]
 
 
-# /sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon3/temp1_crit
-NVME_PATH = list(Path('/').glob('sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon*/'))[0]
-NVME_MAX = int(NVME_PATH.joinpath("temp1_max").read_text()) / 1000
-NVME_CRIT = int(NVME_PATH.joinpath("temp1_crit").read_text()) / 1000
-
 def get_nvme_pwm():
-    global NVME_PATH
-    global NVME_MAX
+    # /sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon3/temp1_crit
+    NVME_PATH = list(Path('/').glob('sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon*/'))[0]
+    NVME_MAX = int(NVME_PATH.joinpath("temp1_max").read_text()) / 1000
+    NVME_CRIT = int(NVME_PATH.joinpath("temp1_crit").read_text()) / 1000
 
     temp = int(NVME_PATH.joinpath("temp1_input").read_text()) / 1000
 
@@ -80,9 +77,6 @@ def get_nvme_pwm():
         crit = True
 
     return temp, pwm, crit
-
-PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
-PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
 
 # Does not provide benefit.
 #
@@ -127,6 +121,8 @@ def pwm_loop():
 
         # Doing this once is enough, but it has to be repeated after the system
         # went to standby. Therefor just do it always.
+        PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
+        PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
         PWM_ENABLE_PATH.write_text("1")
         PWM_PATH.write_text(str(pwm))
         last_pwm = pwm

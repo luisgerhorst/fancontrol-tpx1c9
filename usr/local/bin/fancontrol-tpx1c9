@@ -4,6 +4,7 @@ import time
 import sys
 from pathlib import Path
 import logging
+import math
 
 # TODO: Use a different scale if noise-canceling headphones are connected or if
 # it's loud around us (detect using microphone).
@@ -63,7 +64,8 @@ def get_cpu_pwm():
 def get_cpu_pwm_loadavg():
     curr_load = float(Path('/proc/loadavg').read_text().split()[0])
     nproc = int(Path('/sys/devices/system/cpu/online').read_text().split('-')[1]) + 1
-    pwm = 0 if curr_load < nproc else 255
+    load_fraction = min((curr_load / nproc), 1)
+    pwm = math.floor(load_fraction * load_fraction * 255)
     logging.info(f'load:\t{pwm}pwm\tloadavg {curr_load}')
     return pwm
 
@@ -126,6 +128,9 @@ def pwm_loop():
         max_pwm = last_pwm + MAX_PWM_DELTA
         if pwm > max_pwm and not nvme_crit:
             pwm = max_pwm
+        min_pwm = last_pwm - MAX_PWM_DELTA
+        if pwm < min_pwm:
+            pwm = min_pwm
 
         logging.info(f'all:\t{pwm}pwm')
 

@@ -20,13 +20,15 @@ CPU_MAP = [(0, 0),
 # 80:4800
 # 255:8000
 
-INTERVAL=1
-CPU_TEMP_HIST_MAX = 60/INTERVAL
+INTERVAL=2
+CPU_TEMP_HIST_MAX = 120/INTERVAL
 CPU_TEMP_HIST = list()
+cpu_level = 0
 
-def get_cpu_pwm(cpu_level):
+def get_cpu_pwm():
     global CPU_TEMP_HIST_MAX
     global CPU_TEMP_HIST
+    global cpu_level
 
     # In DegC.
     # CPU_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/temp1_input'))[0]
@@ -53,8 +55,17 @@ def get_cpu_pwm(cpu_level):
             if temp < t:
                 cpu_level = l
 
-    return cpu_level, curr_temp, temp, CPU_MAP[cpu_level][1]
+    pwm = CPU_MAP[cpu_level][1]
+    logging.info(f'temp:\t{pwm}pwm\tavg {int(temp)}°C\tcurr {curr_temp}°C')
+    return pwm
 
+
+def get_cpu_pwm_loadavg():
+    curr_load = float(Path('/proc/loadavg').read_text().split()[0])
+    nproc = int(Path('/sys/devices/system/cpu/online').read_text().split('-')[1]) + 1
+    pwm = 0 if curr_load < nproc else 255
+    logging.info(f'load:\t{pwm}pwm\tloadavg {curr_load}')
+    return pwm
 
 def get_nvme_pwm():
     # /sys/devices/pci0000:00/0000:00:06.0/0000:04:00.0/nvme/nvme0/hwmon3/temp1_crit
@@ -75,7 +86,8 @@ def get_nvme_pwm():
         pwm = 255
         crit = True
 
-    return temp, pwm, crit
+    logging.info(f'nvme:\t{pwm}pwm\t{temp}°C')
+    return pwm, crit
 
 # Does not provide benefit.
 #
@@ -97,18 +109,17 @@ def get_nvme_pwm():
 #         elapsed += RPM_INTERVAL
 #     return pwm
 
+PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
+
 def pwm_loop():
-    MAX_PWM_DELTA = 20
-
-    cpu_level = 0
-    last_pwm = 30
-
+    MAX_PWM_DELTA = 5
+    last_pwm = 40
     while True:
-        cpu_level, cpu_temp, cpu_avg_temp, cpu_pwm = get_cpu_pwm(cpu_level)
-        nvme_temp, nvme_pwm, nvme_crit = get_nvme_pwm()
+        cpu_pwm = get_cpu_pwm()
+        cpu_loadavg_pwm = get_cpu_pwm_loadavg()
+        nvme_pwm, nvme_crit = get_nvme_pwm()
 
-        pwm = max(cpu_pwm, nvme_pwm)
-
+        pwm = max(cpu_pwm, cpu_loadavg_pwm, nvme_pwm)
         # Limit rate of pwm increase to prevent over-compensation. Fanspeed can
         # not change as fast anyway. Rarely triggers as average temp. does not
         # change quickly anyway.
@@ -116,12 +127,11 @@ def pwm_loop():
         if pwm > max_pwm and not nvme_crit:
             pwm = max_pwm
 
-        logging.info("cpu %d°C %d°C %dpwm, nvme %d°C %dpwm => %dpwm" % (cpu_temp, cpu_avg_temp, cpu_pwm, nvme_temp, nvme_pwm, pwm))
+        logging.info(f'all:\t{pwm}pwm')
 
         # Doing this once is enough, but it has to be repeated after the system
         # went to standby. Therefor just do it always.
         PWM_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1'))[0]
-        PWM_ENABLE_PATH = list(Path('/').glob('sys/devices/platform/thinkpad_hwmon/hwmon/hwmon*/pwm1_enable'))[0]
         PWM_ENABLE_PATH.write_text("1")
         PWM_PATH.write_text(str(pwm))
         last_pwm = pwm

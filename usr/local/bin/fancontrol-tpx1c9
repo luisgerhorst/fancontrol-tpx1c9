@@ -10,11 +10,10 @@ import logging
 
 # (enable_temp, pwm): increase to pwm if > enable_temp, decrease to pwm if < enable_temp
 CPU_MAP = [(0, 0),
-           (55, 0),
-           (75, 40),
-           (85, 80),
-           (90, 120),
-           (95, 255)]
+           (45, 0),
+           (65, 40),
+           (70, 120),
+           (75, 255)]
 # PWM:RPM
 # 30:0
 # 35:4500

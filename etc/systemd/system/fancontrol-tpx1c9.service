@@ -1,0 +1,11 @@
+[Unit]
+Description=Linux fancontrol script for Lenovo ThinkPad X1 Carbon Gen 9 (20XXS0Y800)
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fancontrol-tpx1c9
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
